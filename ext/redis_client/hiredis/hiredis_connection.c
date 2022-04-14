@@ -45,6 +45,14 @@ typedef struct {
     redisSSLContext *context;
 } hiredis_ssl_context_t;
 
+typedef struct {
+    redisContext *context;
+    struct timeval connect_timeout;
+    struct timeval read_timeout;
+    struct timeval write_timeout;
+    VALUE privobj;
+} hiredis_connection_t;
+
 #define ENSURE_CONNECTED(connection) if (!connection->context) rb_raise(rb_eRuntimeError, "[BUG] not connected");
 
 #define SSL_CONTEXT(from, name) \
@@ -112,6 +120,26 @@ static VALUE hiredis_ssl_context_init(VALUE self, VALUE ca_file, VALUE ca_path, 
     return Qnil;
 }
 
+static inline void reply_store(redisReadTask *task, VALUE value) {
+    if (task->idx == -1) {
+        hiredis_connection_t *connection = (hiredis_connection_t *)task->privdata;
+        connection->privobj = value;
+    } else {
+        task->privdata = (void*)value;
+    }
+}
+
+static inline VALUE reply_pop(const redisReadTask *task) {
+    if (task->idx == -1) {
+        hiredis_connection_t *connection = (hiredis_connection_t *)task->privdata;
+        VALUE value = connection->privobj;
+        connection->privobj = Qnil;
+        return value;
+    } else {
+        return (VALUE)task->privdata;
+    }
+}
+
 static void *reply_append(const redisReadTask *task, VALUE value) {
     if (task && task->parent) {
         volatile VALUE parent = (VALUE)task->parent->obj;
@@ -123,11 +151,10 @@ static void *reply_append(const redisReadTask *task, VALUE value) {
                 break;
             case REDIS_REPLY_MAP:
                 if (task->idx % 2) {
-                    volatile VALUE key = (VALUE)task->parent->privdata;
-                    task->parent->privdata = NULL;
+                    volatile VALUE key = reply_pop(task->parent);
                     rb_hash_aset(parent, key, value);
                 } else {
-                    task->parent->privdata = (void*)value;
+                    reply_store(task->parent, value);
                 }
                 break;
             case REDIS_REPLY_SET:
@@ -209,26 +236,20 @@ static redisReplyObjectFunctions reply_functions = {
         rb_raise(rb_eArgError, "NULL found for " # name " when shouldn't be."); \
     }
 
-
-typedef struct {
-    redisContext *context;
-    struct timeval connect_timeout;
-    struct timeval read_timeout;
-    struct timeval write_timeout;
-} hiredis_connection_t;
-
 void hiredis_connection_mark_task(redisReadTask *task) {
-    while (task) {
-        if (task->obj) { rb_gc_mark((VALUE)task->obj); }
-        if (task->privdata) { rb_gc_mark((VALUE)task->privdata); }
-        task = task->parent;
+    if (task->obj) { rb_gc_mark((VALUE)task->obj); }
+
+    if (task->idx != -1 && task->privdata) {
+        rb_gc_mark((VALUE)task->privdata);
     }
 }
 
 void hiredis_connection_mark(void *ptr) {
     hiredis_connection_t *connection = ptr;
+    rb_gc_mark(connection->privobj);
     if (connection->context) {
         redisReader *reader = connection->context->reader;
+
         for (int index = 0; index < reader->tasks; index++) {
             hiredis_connection_mark_task(reader->task[index]);
         }
@@ -238,19 +259,11 @@ void hiredis_connection_free(void *ptr) {
     hiredis_connection_t *connection = ptr;
     if (connection) {
          if (connection->context) {
+             xfree(connection->context->privdata);
              redisFree(connection->context);
          }
          xfree(connection);
     }
-}
-
-static size_t hiredis_connection_task_memsize(redisReadTask *task) {
-    size_t size = 0;
-    while (task) {
-        size += sizeof(redisReadTask);
-        task = task->parent;
-    }
-    return size;
 }
 
 static size_t hiredis_connection_memsize(const void *ptr) {
@@ -264,10 +277,7 @@ static size_t hiredis_connection_memsize(const void *ptr) {
             redisReader *reader = connection->context->reader;
             size += sizeof(redisReader);
             size += reader->maxbuf;
-
-            for (int index = 0; index < reader->tasks; index++) {
-                size += hiredis_connection_task_memsize(reader->task[index]);
-            }
+            size += reader->tasks * sizeof(redisReadTask);
         }
     }
 
@@ -434,6 +444,8 @@ static VALUE hiredis_connect_finish(hiredis_connection_t *connection, redisConte
 
     context->reader->fn = &reply_functions;
     redisSetPushCallback(context, NULL);
+
+    context->reader->privdata = connection;
     connection->context = context;
     return Qtrue;
 }

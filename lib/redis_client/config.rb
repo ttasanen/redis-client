@@ -11,7 +11,7 @@ class RedisClient
     DEFAULT_DB = 0
 
     module Common
-      attr_reader :db, :username, :password, :id, :ssl, :ssl_params,
+      attr_reader :db, :username, :password, :id, :ssl, :ssl_params, :encoding,
         :connect_timeout, :read_timeout, :write_timeout, :driver, :connection_prelude
 
       alias_method :ssl?, :ssl
@@ -28,7 +28,8 @@ class RedisClient
         ssl: nil,
         ssl_params: nil,
         driver: :ruby,
-        reconnect_attempts: false
+        reconnect_attempts: false,
+        encoding: Encoding::UTF_8
       )
         @username = username || DEFAULT_USERNAME
         @password = password
@@ -57,6 +58,8 @@ class RedisClient
         @reconnect_attempts = reconnect_attempts
 
         @connection_prelude = build_connection_prelude
+
+        @encoding = encoding
       end
 
       def sentinel?

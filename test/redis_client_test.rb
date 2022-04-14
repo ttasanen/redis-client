@@ -384,6 +384,10 @@ module RedisClientTests
     client.close
     assert_includes client.call("CLIENT", "INFO"), " name=peter "
   end
+
+  def test_encoding
+    
+  end
 end
 
 class RedisClientTest < Minitest::Test
