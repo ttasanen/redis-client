@@ -132,7 +132,7 @@ static inline void reply_store(redisReadTask *task, VALUE value) {
 static inline VALUE reply_pop(const redisReadTask *task) {
     if (task->idx == -1) {
         hiredis_connection_t *connection = (hiredis_connection_t *)task->privdata;
-        VALUE value = connection->privobj;
+        volatile VALUE value = connection->privobj;
         connection->privobj = Qnil;
         return value;
     } else {
@@ -248,6 +248,7 @@ void hiredis_connection_mark(void *ptr) {
     hiredis_connection_t *connection = ptr;
 
     if (RTEST(connection->privobj)) {
+        printf("rb_gc_mark %p", (void *)connection->privobj);
         rb_gc_mark(connection->privobj);
     }
     if (connection->context) {
@@ -262,7 +263,6 @@ void hiredis_connection_free(void *ptr) {
     hiredis_connection_t *connection = ptr;
     if (connection) {
          if (connection->context) {
-             xfree(connection->context->privdata);
              redisFree(connection->context);
          }
          xfree(connection);
