@@ -38,7 +38,7 @@ if RUBY_ENGINE == "ruby"
 
   $CFLAGS << " -I#{hiredis_dir}"
   $LDFLAGS << " #{hiredis_dir}/libhiredis.a #{hiredis_dir}/libhiredis_ssl.a -lssl -lcrypto"
-  $CFLAGS << " -O3"
+  $CFLAGS << " -O0 -g"
   $CFLAGS << " -std=c99 "
 
   if ENV["EXT_PEDANTIC"]
