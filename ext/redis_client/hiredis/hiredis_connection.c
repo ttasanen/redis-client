@@ -246,7 +246,10 @@ void hiredis_connection_mark_task(redisReadTask *task) {
 
 void hiredis_connection_mark(void *ptr) {
     hiredis_connection_t *connection = ptr;
-    rb_gc_mark(connection->privobj);
+
+    if (RTEST(connection->privobj)) {
+        rb_gc_mark(connection->privobj);
+    }
     if (connection->context) {
         redisReader *reader = connection->context->reader;
 
